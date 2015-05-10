@@ -374,7 +374,7 @@ int sfs_open(const char *path, struct fuse_file_info *fileInfo)
     
     struct file_info *fi = sfs_load_file(de);
     
-    if (fdata == NULL)
+    if (fi == NULL)
         return -ENOMEM;
     
     fileInfo->fh = (uint64_t)fi;
