@@ -1,7 +1,7 @@
 FUSE Small File System
 ======================
 
-`SmallFS` in a implementation of a FUSE driver for a small and simple file system.  This file system has been originally designed to be use as part of the Operating System classes at UNITEC (Universidad Tecnologica Centroamericana http://www.unitec.edu).
+`SmallFS` in a implementation of a FUSE driver for a small and simple file system.  The driver has been implemented to be use as part of the Operating System classes at UNITEC (Universidad Tecnologica Centroamericana http://www.unitec.edu).  The file system was designed by Michael Black (http://nw08.american.edu/~mblack/) from the American University.
 
 File System Description
 -----------------------
