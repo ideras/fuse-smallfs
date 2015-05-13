@@ -38,15 +38,12 @@ void dump_hex(const void* data, size_t size) {
 void sfs_ensure_root_dir_loaded()
 {
     if (!root_dir_loaded) {
-        
-        device_read_sector(map, 1);
         device_read_sector(root_dir_block, 2);
         
         root_dir_loaded = 1;
         root_dir_need_update = 0;
         
         printf("Loading root directory ...\n");
-        dump_hex(map, 16);
         dump_hex(root_dir_block, 64);
     }
 }
@@ -129,10 +126,16 @@ int sfs_get_free_sector()
 {
     int i = 0;
     
-    while ( (map[i] == 0xFF) && (i < MAX_MAP_ENTRIES) )
+    while ( (map[i] != 0) && (i < MAX_MAP_ENTRIES) )
         i++;
     
-    return (map[i] == 0xFF)? -1 : i;
+    if (i < 3) {
+        printf("BUG in the machine, sectors 0, 1, 2 cannot be used to store file data\n" );
+        dump_hex(map, 16);
+        return -1;
+    }
+
+    return (map[i] != 0)? -1 : i;
 }
 
 int sfs_update_file_info(struct file_info *fi)
@@ -248,27 +251,38 @@ int sfs_mknod(const char *path, mode_t mode, dev_t dev)
     printf("mknod(path=%s, mode=%d)\n", path, mode);
     
     if ( S_ISREG(mode) ) {
-        int i = 0;
-        struct dir_entry *dentry;
+        int i;
+        char f_name[MAX_NAME_LEN+1];
+        const char *of_name = &path[1];
+        struct dir_entry *de;
+        
+        memset(f_name, 0, MAX_NAME_LEN+1);
+        strncpy(f_name, of_name, MAX_NAME_LEN);
+        f_name[MAX_NAME_LEN] = 0;
+        
+        de =sfs_lookup_root_dir(f_name);
+        if (de != NULL)
+            return -EEXIST;
         
         root_dir_need_update = 1;
-        printf("Creating file %s\n", &path[1]);
+        printf("Creating file %s\n", f_name);
         
         sfs_ensure_root_dir_loaded();
         
         //Look up a empty directory entry
+        i = 0;
         while (root_dir[i].name[0] != '\0' && i<MAX_ROOT_DENTRIES) i++;
         
         if (root_dir[i].name[0] != '\0')
             return -ENOSPC;
         
-        printf("Creating file %d\n", i);
+        printf("Creating file with inode %d\n", i);
         
-        dentry = &root_dir[i];
-        strncpy(dentry->name, &path[1], MAX_NAME_LEN);
+        de = &root_dir[i];
+        memcpy(de->name, f_name, MAX_NAME_LEN);
         
         for (i=0; i<MAX_SECTORS_PER_FILE; i++)
-            dentry->sectors[i] = 0;
+            de->sectors[i] = 0;
         
         dump_hex(root_dir_block, 64);
         
@@ -545,6 +559,9 @@ int sfs_fsyncdir(const char *path, int datasync, struct fuse_file_info *fileInfo
 
 void sfs_init(struct fuse_conn_info *conn) {
     printf("%s\n", __FUNCTION__);
-    return;
+    
+    printf("Loading file system map ...\n");
+    device_read_sector(map, 1);
+    dump_hex(map, 16);
 }
 
