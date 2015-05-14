@@ -122,7 +122,7 @@ void sfs_remove_file(struct dir_entry *dentry)
     root_dir_need_update = 1;
 }
 
-int sfs_get_free_sector()
+int sfs_get_free_block()
 {
     int i = 0;
     
@@ -138,20 +138,43 @@ int sfs_get_free_sector()
     return (map[i] != 0)? -1 : i;
 }
 
+int sfs_commit_file(struct file_info *fi)
+{
+    struct dir_entry *de = fi->f_dentry;
+    char f_name[MAX_NAME_LEN+1];
+    int i;
+        
+    printf("%s: size=%d\n", __FUNCTION__, fi->f_size);
+    
+    strncpy(f_name, de->name, MAX_NAME_LEN);
+    f_name[MAX_NAME_LEN] = 0;
+    
+    unsigned char *ptr_data = fi->f_data;
+    
+    for (i = 0; de->sectors[i] != 0; i++) {
+        int sector = de->sectors[i];
+        
+        printf("File '%s' writing sector %d\n", f_name, sector);
+        device_write_sector(ptr_data, sector);
+        
+        ptr_data += SECTOR_SIZE;
+    }
+    
+    return 1;
+}
+
 int sfs_update_file_info(struct file_info *fi)
 {
     int i = 0, size = fi->f_size;
     struct dir_entry *dentry = fi->f_dentry;
     unsigned char *ptr_data = fi->f_data;
-    
-    printf("%s: size=%d\n", __FUNCTION__, size);
-    
+
     while (size > 0) {
         int sector = dentry->sectors[i];
         
         if (sector == 0) {
             //We need a new sector
-            sector = sfs_get_free_sector();
+            sector = sfs_get_free_block();
             
             if (sector == -1) 
                 return 0;
@@ -160,7 +183,7 @@ int sfs_update_file_info(struct file_info *fi)
             map[sector] = 0xFF;
         }
         
-        printf("Writing device sector %d\n", sector);
+        printf("Writing sector %d, size = %d\n", sector, size);
         device_write_sector(ptr_data, sector);
         
         size -= SECTOR_SIZE;
@@ -353,7 +376,7 @@ int sfs_truncate(const char *path, off_t newSize)
 {
 	struct dir_entry *de = sfs_lookup_root_dir(&path[1]);
     
-    printf("truncate(path=%s, newSize=%d\n", path, (int)newSize);
+    printf("truncate(path=%s, newSize=%d)\n", path, (int)newSize);
     
     if (de == NULL)
         return -ENOENT;
@@ -415,21 +438,63 @@ int sfs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse
     return bytes_to_read;
 }
 
+int sfs_grow_file(struct file_info *fi, int new_size)
+{
+    struct dir_entry *de = fi->f_dentry;
+    int i, extra_size;
+    
+    for (i = 0; de->sectors[i] != 0; i++);
+    
+    printf("Growing file, size = %d, new size = %d\n", fi->f_size, new_size);
+    dump_hex(de->name, 6);
+    printf("\n");
+    
+    extra_size = new_size - fi->f_size;
+    while (extra_size > 0) {
+        int sector = sfs_get_free_block();
+        if (sector == -1) {
+            return -ENOSPC;
+        }
+        map[sector] = 0xFF;
+        de->sectors[i] = sector;
+        extra_size -= SECTOR_SIZE;
+        i++;
+        
+        printf("Allocating block %d\n", sector);
+        if (i >= MAX_SECTORS_PER_FILE)
+            return -ENOSPC;
+    }
+    
+    root_dir_need_update = 1;
+    
+    return 0;
+}
+
 int sfs_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fileInfo) 
 {
     struct file_info *fi = (struct file_info *)fileInfo->fh;
+    int f_size, f_bcount;
 
-    printf("write(path=%s, size=%d, offset=%d, f_size=%d)\n", path, (int)size, (int)offset, fi->f_size);
-    
+    sfs_get_file_stat(fi->f_dentry, &f_size, &f_bcount);
+    printf("write(path=%s, size=%d, offset=%d, f_size1=%d, f_size2=%d)\n", path, (int)size, (int)offset, fi->f_size, f_size);
+
+    fi->f_size = f_size;
     if (offset + size > fi->f_size) {
         if (offset + size > MAX_FILE_SIZE)
             return -EFBIG;
         
-        fi->f_size = offset + size;
+        int new_size = (offset + size);
+        int ret = sfs_grow_file(fi, new_size);
+        
+        if (ret < 0)
+            return ret;       
+        
+        fi->f_size = new_size;
     }
 
     fi->need_update = 1;
     memcpy(&fi->f_data[offset], buf, size);
+    
     printf("write(path=%s, size=%d, offset=%d, f_size=%d)\n", path, (int)size, (int)offset, fi->f_size);
 
     return size;
@@ -459,12 +524,17 @@ int sfs_statfs(const char *path, struct statvfs *statInfo)
 
 int sfs_flush(const char *path, struct fuse_file_info *fileInfo) 
 {
+    int f_size, f_bcount;
     struct file_info *fi = (struct file_info *)fileInfo->fh;
     
     printf("flush(path=%s)\n", path);
     
-    if (fi->need_update) {
-        if (!sfs_update_file_info(fi))
+    sfs_get_file_stat(fi->f_dentry, &f_size, &f_bcount);
+    
+    if (fi->need_update || (f_size != fi->f_size) ) {
+        
+        fi->f_size = f_size;
+        if (!sfs_commit_file(fi))
             return -ENOSPC;
     }
 
