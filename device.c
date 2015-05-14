@@ -15,6 +15,7 @@ int device_open(const char *path)
 
 void device_close()
 {
+    fflush(f);
     fclose(f);
 }
 
@@ -30,4 +31,9 @@ int device_write_sector(unsigned char buffer[], int sector)
     fseek(f, sector*SECTOR_SIZE, SEEK_SET);
 	
     return ( fwrite(buffer, 1, SECTOR_SIZE, f) == SECTOR_SIZE );
+}
+
+void device_flush()
+{
+    fflush(f);
 }

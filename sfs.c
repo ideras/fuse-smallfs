@@ -160,36 +160,7 @@ int sfs_commit_file(struct file_info *fi)
         ptr_data += SECTOR_SIZE;
     }
     
-    return 1;
-}
-
-int sfs_update_file_info(struct file_info *fi)
-{
-    int i = 0, size = fi->f_size;
-    struct dir_entry *dentry = fi->f_dentry;
-    unsigned char *ptr_data = fi->f_data;
-
-    while (size > 0) {
-        int sector = dentry->sectors[i];
-        
-        if (sector == 0) {
-            //We need a new sector
-            sector = sfs_get_free_block();
-            
-            if (sector == -1) 
-                return 0;
-            
-            dentry->sectors[i] = sector;
-            map[sector] = 0xFF;
-        }
-        
-        printf("Writing sector %d, size = %d\n", sector, size);
-        device_write_sector(ptr_data, sector);
-        
-        size -= SECTOR_SIZE;
-        ptr_data += SECTOR_SIZE;
-        i++;
-    }
+    device_flush();
     
     return 1;
 }
@@ -616,6 +587,7 @@ int sfs_releasedir(const char *path, struct fuse_file_info *fileInfo) {
 
         device_write_sector(map, 1);
         device_write_sector(root_dir_block, 2);
+        device_flush();
         root_dir_need_update = 0;
     }
     
