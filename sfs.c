@@ -41,7 +41,6 @@ void sfs_ensure_root_dir_loaded()
         device_read_sector(root_dir_block, 2);
         
         root_dir_loaded = 1;
-        root_dir_need_update = 0;
         
         printf("Loading root directory ...\n");
         dump_hex(root_dir_block, 64);
@@ -105,6 +104,20 @@ struct file_info *sfs_load_file(struct dir_entry *dentry)
     return fi;
 }
 
+void sfs_update_map()
+{
+    printf("Writing map to disc ...\n");
+    device_write_sector(map, 1);
+    device_flush();
+}
+
+void sfs_update_root_dir()
+{
+    printf("Writing root directory to disc ...\n");
+    device_write_sector(root_dir_block, 2);
+    device_flush();
+}
+
 void sfs_remove_file(struct dir_entry *dentry)
 {
     int i;
@@ -118,8 +131,8 @@ void sfs_remove_file(struct dir_entry *dentry)
     }
     
     memset(dentry, 0, sizeof(struct dir_entry));
-    
-    root_dir_need_update = 1;
+    sfs_update_map();
+    sfs_update_root_dir();
 }
 
 int sfs_get_free_block()
@@ -254,11 +267,10 @@ int sfs_mknod(const char *path, mode_t mode, dev_t dev)
         strncpy(f_name, of_name, MAX_NAME_LEN);
         f_name[MAX_NAME_LEN] = 0;
         
-        de =sfs_lookup_root_dir(f_name);
+        de = sfs_lookup_root_dir(f_name);
         if (de != NULL)
             return -EEXIST;
         
-        root_dir_need_update = 1;
         printf("Creating file %s\n", f_name);
         
         sfs_ensure_root_dir_loaded();
@@ -275,10 +287,13 @@ int sfs_mknod(const char *path, mode_t mode, dev_t dev)
         de = &root_dir[i];
         memcpy(de->name, f_name, MAX_NAME_LEN);
         
+        printf("Root dir with file %s\n", f_name);
+        dump_hex(&root_dir[i], 64);
+        
         for (i=0; i<MAX_SECTORS_PER_FILE; i++)
             de->sectors[i] = 0;
         
-        dump_hex(root_dir_block, 64);
+        sfs_update_root_dir();
         
         return 0;
     }
@@ -322,8 +337,8 @@ int sfs_rename(const char *path, const char *newpath)
     if (de == NULL)
         return -ENOENT;
     
-    root_dir_need_update = 1;
     strncpy(de->name, &newpath[1], 6);
+    sfs_update_root_dir();
     
     return 0;
 }
@@ -361,7 +376,7 @@ int sfs_truncate(const char *path, off_t newSize)
             map[sector] = 0;
             printf("Releasing sector %d\n", sector);
         }
-        root_dir_need_update = 1;
+        sfs_update_map();
     }
     
     return 0;
@@ -436,7 +451,8 @@ int sfs_grow_file(struct file_info *fi, int new_size)
             return -ENOSPC;
     }
     
-    root_dir_need_update = 1;
+    sfs_update_root_dir();
+    sfs_update_map();
     
     return 0;
 }
@@ -466,7 +482,7 @@ int sfs_write(const char *path, const char *buf, size_t size, off_t offset, stru
     fi->need_update = 1;
     memcpy(&fi->f_data[offset], buf, size);
     
-    printf("write(path=%s, size=%d, offset=%d, f_size=%d)\n", path, (int)size, (int)offset, fi->f_size);
+    printf("After write(path=%s, size=%d, offset=%d, f_size=%d)\n", path, (int)size, (int)offset, fi->f_size);
 
     return size;
 }
@@ -544,7 +560,6 @@ int sfs_opendir(const char *path, struct fuse_file_info *fileInfo)
     if (!device_read_sector(root_dir_block, 2))
         return -ENOENT;
     
-    root_dir_need_update = 0;
     root_dir_loaded = 1;
     
     dump_hex(root_dir_block, 64);
@@ -578,18 +593,6 @@ int sfs_releasedir(const char *path, struct fuse_file_info *fileInfo) {
     int path_len = strlen(path);
 
     printf("%s: %s\n", __FUNCTION__, path);
-
-    if ((path_len != 1) && path[0] != '/')
-        return -EPERM;
-    
-    if (root_dir_need_update) {
-        printf("Writing root directory to disc...\n");
-
-        device_write_sector(map, 1);
-        device_write_sector(root_dir_block, 2);
-        device_flush();
-        root_dir_need_update = 0;
-    }
     
     return 0;
 }
@@ -599,11 +602,9 @@ int sfs_fsyncdir(const char *path, int datasync, struct fuse_file_info *fileInfo
     return -EPERM;
 }
 
-void sfs_init(struct fuse_conn_info *conn) {
-    printf("%s\n", __FUNCTION__);
-    
+void sfs_init(struct fuse_conn_info *conn) 
+{
     printf("Loading file system map ...\n");
     device_read_sector(map, 1);
-    dump_hex(map, 16);
 }
 
