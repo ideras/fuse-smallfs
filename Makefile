@@ -11,7 +11,7 @@ bin:
 	mkdir -p bin
 
 bin/sfs: bin obj/sfs.o obj/device.o obj/main.o
-	g++ -g $(LINKFLAGS) -o bin/sfs obj/*
+	g++ -g -o bin/sfs obj/* $(LINKFLAGS)
 
 obj:
 	mkdir -p obj
